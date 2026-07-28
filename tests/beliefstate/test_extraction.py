@@ -344,3 +344,24 @@ class TestCommitmentFieldGuard:
         assert "SEPARATE fields" in prompt
         assert '"value": "VIOLATED"' in prompt
         assert '"commitment_status": "VIOLATED"' in prompt
+
+
+class TestBetrayalDirectionGuard:
+    """Observed live: the player saying "I have betrayed you" (Player ->
+    Belethor) got extracted as Belethor betraying the Player - subject/object
+    reversed, despite the general pronoun-resolution instruction already
+    covering "I"/"you". Generic "subject is an Actor, object is an Actor"
+    schema wording never states which role is the betrayer, so this adds an
+    explicit rule plus a worked example matching the exact failing sentence -
+    same "abstract rule alone wasn't enough, a concrete example was" pattern
+    that fixed the COMMITMENT field mix-up."""
+
+    def test_guard_present_in_player_side_prompt(self):
+        prompt = ClaimExtractor._ClaimExtractor__build_system_prompt({Actor.BELETHOR, Actor.PLAYER})
+        assert "whoever DID the betraying" in prompt
+        assert "I have betrayed you" in prompt
+
+    def test_guard_present_in_npc_side_prompt(self):
+        prompt = ClaimExtractor._ClaimExtractor__build_npc_system_prompt(Actor.BELETHOR, {Actor.BELETHOR, Actor.PLAYER})
+        assert "whoever DID the betraying" in prompt
+        assert "I have betrayed you" in prompt

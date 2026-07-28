@@ -55,6 +55,30 @@ _QUESTION_GUARD = (
     "explicitly stated, never what is merely asked."
 )
 
+_DIRECTION_GUARD = (
+    "For any predicate where both \"subject\" and \"object\" are Actors, "
+    "assign them purely from grammar: the grammatical agent (who performs "
+    "the action) is always \"subject\", the grammatical patient/recipient is "
+    "always \"object\". Never fall back on genre expectations about who "
+    "usually plays which role in a Skyrim quest - eg assuming NPCs are the "
+    "ones who promise or offer to follow, or that the player is the one "
+    "betrayed. A given sentence can go either way; only its own grammar "
+    "decides subject vs object."
+)
+
+_BETRAYAL_DIRECTION_GUARD = (
+    "For \"BETRAYAL\": \"subject\" is whoever DID the betraying, \"object\" is "
+    "whoever WAS betrayed - never the reverse, and never guess the direction "
+    "from tone or who seems sympathetic. Determine it purely from grammar: "
+    "the grammatical agent (the one performing the action of betraying) is "
+    "\"subject\"; the grammatical patient (the one betrayal was done to) is "
+    "\"object\". Example: \"I have betrayed you\" said by the player about "
+    "an NPC means the PLAYER did the betraying - "
+    "{\"predicate\": \"BETRAYAL\", \"subject\": \"Player\", \"object\": \"<the NPC>\", \"value\": true}, "
+    "NOT the NPC as subject. \"You betrayed me\" is the opposite: the person "
+    "\"you\" refers to is \"subject\", \"Player\" is \"object\"."
+)
+
 _COMMITMENT_FIELD_GUARD = (
     "\"COMMITMENT\" has two SEPARATE fields - do not confuse them:\n"
     "- \"value\" is WHAT was promised: always exactly \"WAIT\" or "
@@ -273,17 +297,22 @@ Predicates (subject domain / object domain / value domain):
 
 Allowed actor names for this turn: {actor_names}
 Allowed item names: {item_names}
+Copy every predicate, actor, item, and value name exactly as written above, including case - never translate, paraphrase, or re-case them.
 
 The "Player said" text, if present, is spoken BY "Player" TO {npc_names}. Resolve pronouns from the player's point of view: "you"/"your" refers to {npc_names}, "I"/"me"/"my" refers to "Player".
 
 {_QUESTION_GUARD}
+
+{_DIRECTION_GUARD}
+
+{_BETRAYAL_DIRECTION_GUARD}
 
 Output ONLY a JSON array, no prose, no markdown code fences. Each element must have this shape:
 {{"predicate": "<one of the predicate names above>", "subject": "<actor name>", "object": "<actor or item name, matching the predicate's object domain>", "value": <matching the predicate's value domain>, "source": "player" or "game_event"}}
 
 {_COMMITMENT_FIELD_GUARD}
 
-Tag "source" as "player" for claims coming from what the player said, and "game_event" for claims coming from the game event lines. Do not guess a source for a claim that doesn't clearly come from one of the two inputs below.
+Tag "source" as "player" for claims coming from what the player said, and "game_event" for claims coming from the game event lines. Do not guess a source for a claim that doesn't clearly come from one of these two inputs.
 
 If nothing applies, output exactly: []"""
 
@@ -302,10 +331,15 @@ Predicates (subject domain / object domain / value domain):
 
 Allowed actor names for this turn: {actor_names}
 Allowed item names: {item_names}
+Copy every predicate, actor, item, and value name exactly as written above, including case - never translate, paraphrase, or re-case them.
 
 The text below is spoken BY "{speaker.value}". Resolve pronouns from {speaker.value}'s point of view: "I"/"me"/"my" refers to "{speaker.value}", "you"/"your" refers to "Player".
 
 {_QUESTION_GUARD}
+
+{_DIRECTION_GUARD}
+
+{_BETRAYAL_DIRECTION_GUARD}
 
 Output ONLY a JSON array, no prose, no markdown code fences. Each element must have this shape:
 {{"predicate": "<one of the predicate names above>", "subject": "<actor name>", "object": "<actor or item name, matching the predicate's object domain>", "value": <matching the predicate's value domain>}}
