@@ -1,9 +1,13 @@
+import time as time_module
 from typing import Any, Hashable
 from src.conversation.action import Action
 from src.http.communication_constants import communication_constants
 from src.conversation.conversation_log import conversation_log
 from src.characters_manager import Characters
 from src.remember.remembering import Remembering
+from src.beliefstate.manager import BeliefStateManager
+from src.beliefstate.extraction import ClaimExtractor
+from src.beliefstate.verifier import ActionVerifier
 from src import utils
 from src.utils import get_time_group
 from src.character_manager import Character
@@ -20,7 +24,7 @@ class Context:
     TOKEN_LIMIT_PERCENT: float = 0.45
 
     @utils.time_it
-    def __init__(self, world_id: str, config: ConfigLoader, client: LLMClient, rememberer: Remembering, language: dict[Hashable, str]) -> None:
+    def __init__(self, world_id: str, config: ConfigLoader, client: LLMClient, rememberer: Remembering, language: dict[Hashable, str], belief_state_manager: BeliefStateManager | None = None, claim_extractor: ClaimExtractor | None = None, action_verifier: ActionVerifier | None = None) -> None:
         self.__world_id = world_id
         self.__hourly_time = config.hourly_time
         self.__prev_game_time: tuple[str | None, str] | None = None
@@ -28,6 +32,9 @@ class Context:
         self.__config: ConfigLoader = config
         self.__client: LLMClient = client
         self.__rememberer: Remembering = rememberer
+        self.__belief_state_manager: BeliefStateManager | None = belief_state_manager
+        self.__claim_extractor: ClaimExtractor | None = claim_extractor
+        self.__action_verifier: ActionVerifier | None = action_verifier
         self.__language: dict[Hashable, str] = language
         self.__weather: str = ""
         self.__config_settings: dict[str, Any] = {}
@@ -53,7 +60,19 @@ class Context:
     @property
     def npcs_in_conversation(self) -> Characters:
         return self.__npcs_in_conversation
-    
+
+    @property
+    def belief_state_manager(self) -> BeliefStateManager | None:
+        return self.__belief_state_manager
+
+    @property
+    def claim_extractor(self) -> ClaimExtractor | None:
+        return self.__claim_extractor
+
+    @property
+    def action_verifier(self) -> ActionVerifier | None:
+        return self.__action_verifier
+
     @property
     def config(self) -> ConfigLoader:
         return self.__config
@@ -423,6 +442,7 @@ class Context:
         Returns:
             str: the filled prompt
         """
+        _t0 = time_module.time() 
         player: Character | None = self.__npcs_in_conversation.get_player_character()
         player_name = ""
         player_description = self.__config.player_character_description
@@ -457,7 +477,9 @@ class Context:
             self.__prev_game_time = None, time_group
         non_player_chars = self.__npcs_in_conversation.get_non_player_characters()
         conversation_summaries = self.__rememberer.get_prompt_text(non_player_chars, self.__world_id)
-        
+
+        belief_state = self.__belief_state_manager.get_prompt_text(non_player_chars, self.__world_id) if self.__belief_state_manager else ""
+
         # Only include legacy action prompts if advanced actions are disabled
         actions = self.__get_action_texts(actions_for_prompt) if not self.__config.advanced_actions_enabled else ""
 
@@ -485,6 +507,7 @@ class Context:
                 language=self.__language['language'], 
                 conversation_summary=content[1],
                 conversation_summaries=content[1],
+                belief_state=belief_state,          # <-- nuova riga
                 actions = actions
                 )
             if self.__client.is_too_long(result, self.TOKEN_LIMIT_PERCENT):
@@ -494,7 +517,8 @@ class Context:
                     have_bios_been_dropped = True
             else:
                 break
-        
+
+        logger.log(28,f"Prompt generation took {round(time_module.time() - _t0, 8)} s")
         logger.log(23, f'Prompt sent to LLM ({self.__client.get_count_tokens(result)} tokens): {result.strip()}')
         if have_summaries_been_dropped and have_bios_been_dropped:
             logger.warning(f'Both the bios and summaries of the NPCs selected could not fit into the maximum prompt size of {int(round(self.__client.token_limit * self.TOKEN_LIMIT_PERCENT, 0))} tokens. NPCs will not remember previous conversations and will have limited knowledge of who they are.')

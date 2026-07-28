@@ -449,6 +449,7 @@ class ChatManager:
                             self.__discarded_character_name = settings.discarded_character_name
                             logger.log(self.loglevel, f"LLM addressed unrecognized character '{settings.discarded_character_name}'")
 
+                        logger.log(self.loglevel, f"total LLM streaming duration {round(time.time() - start_time, 5)} s")
                         break  # Got text response or hit an error, exit loop
                                 
                     except Exception as e:

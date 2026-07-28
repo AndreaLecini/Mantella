@@ -6,13 +6,18 @@ from src.http.routes.mantella_route import mantella_route
 from src.setup import MantellaSetup
 from src.ui.start_ui import StartUI
 import src.utils as utils
+import datetime  
 
 def main():
     try:
         mantella_version = '0.14'
+
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_file = f'logging_{timestamp}.log'
+
         config, language_info = MantellaSetup().initialise(
             config_file='config.ini',
-            logging_file='logging.log', 
+            logging_file=log_file, 
             language_file='data/language_support.csv',
             mantella_version=mantella_version)
 

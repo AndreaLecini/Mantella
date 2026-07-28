@@ -236,10 +236,39 @@ class ClientBase(AIClient):
         
         reply = chat_completion.choices[0].message.content
         return reply
-        
-    
+
+
+    @utils.time_it
+    def request_call_with_overridden_params(self, messages: Message | message_thread, param_overrides: dict[str, Any]) -> str | None:
+        """Like request_call(), but merges `param_overrides` into this call's
+        request params only, restoring the client's normal params afterward.
+
+        Same temporary-override technique already used by
+        request_call_with_tools() (there for injecting 'tools'; here for
+        anything else a one-off call needs that differs from normal spoken
+        dialogue, eg a higher max_tokens for a structured-output call to a
+        reasoning model that would otherwise spend its whole token budget on
+        hidden reasoning and return empty content).
+
+        Args:
+            messages: The messages to send to the LLM
+            param_overrides: request params to merge on top of the client's
+                own params for this call only
+
+        Returns:
+            The LLM response message content or None if the request failed
+        """
+        original_params = self._request_params.copy() if self._request_params else {}
+        self._request_params = {**original_params, **param_overrides}
+        try:
+            return self.request_call(messages)
+        finally:
+            self._request_params = original_params
+
+
     @utils.time_it
     async def streaming_call(self, messages: Message | message_thread, is_multi_npc: bool, tools: list[dict] = None) -> AsyncGenerator[tuple[str, str | list] | None, None]:
+        start_time = time.time()
         with create_span_from_thread("llm_streaming_call") as span:
             with self._generation_lock:
                 logger.log(28, 'Getting LLM response...')
@@ -296,6 +325,8 @@ class ClientBase(AIClient):
                     else:
                         async_client = self.generate_async_client()
                     
+                    logger.log(28, f"PROMPT_PREPARATION: {round(time.time() - start_time, 8)}s")  
+
                     # Dict to track partial tool calls by index
                     accumulated_tool_calls = {}
                     

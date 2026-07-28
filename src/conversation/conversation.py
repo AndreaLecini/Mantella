@@ -2,6 +2,7 @@ from enum import Enum
 from threading import Thread, Lock
 import time
 from typing import Any
+from src.beliefstate import engine as beliefstate_engine
 from src.llm.ai_client import AIClient
 from src.llm.sentence_content import SentenceTypeEnum, SentenceContent
 from opentelemetry import context as OpenTelemetryContext
@@ -77,6 +78,7 @@ class Conversation:
         self.last_sentence_start_time = time.time()
         self.__end_conversation_keywords = utils.parse_keywords(context_for_conversation.config.end_conversation_keyword)
         self.__awaiting_action_result: bool = False
+        self.__last_verified_message: AssistantMessage | None = None
 
     @property
     def has_already_ended(self) -> bool:
@@ -108,6 +110,16 @@ class Conversation:
         characters_removed_by_update = self.__context.add_or_update_characters(new_character, len(self.__messages))
         if len(characters_removed_by_update) > 0:
             self.__save_conversation(is_reload=True, departed_npcs=characters_removed_by_update)
+
+        # Load/create each involved NPC's belief-state DAG up front, rather
+        # than lazily on first incidental access (prompt building or claim
+        # insertion, whichever happens first) - this is the one explicit
+        # point where "this conversation's belief state is now ready".
+        belief_state_manager = self.__context.belief_state_manager
+        if belief_state_manager is not None:
+            for character in new_character:
+                if not character.is_player_character:
+                    belief_state_manager.get_dag(character, self.__context.world_id)
 
     @utils.time_it
     def start_conversation(self) -> tuple[str, Sentence | None]:
@@ -215,6 +227,9 @@ class Conversation:
         events_need_updating: bool = False
 
         with self.__generation_start_lock: #This lock makes sure no new generation by the LLM is started while we clear this
+
+            _player_input_start = time.time() 
+
             self.__stop_generation() # Stop generation of additional sentences right now
             self.__sentences.clear() # Clear any remaining sentences from the list
 
@@ -264,11 +279,14 @@ class Conversation:
                 # This also needs to apply when interruptions are allowed, 
                 # otherwise the player could constantly speak over the NPC and never hear a response
                 self.__stt.stop_listening()
-            
+
+            self.__verify_last_npc_response()
+
             new_message: UserMessage = UserMessage(self.__context.config, player_text, player_character.name, False)
             new_message.is_multi_npc_message = self.__context.npcs_in_conversation.contains_multiple_npcs()
             new_message = self.update_game_events(new_message)
             self.__messages.add_message(new_message)
+            self.__extract_and_apply_beliefs(new_message)
             player_voiceline = self.__get_player_voiceline(player_character, player_text)
             text = new_message.text
             logger.log(23, f"Text passed to NPC: {text}")
@@ -280,9 +298,101 @@ class Conversation:
             new_message.is_system_generated_message = True # Flag message containing goodbye as a system message to exclude from summary
             self.initiate_end_sequence()
         else:
+            logger.log(28, f"Player input processed in {round(time.time() - _player_input_start, 5)} s")
             self.__start_generating_npc_sentences()
 
         return player_text, events_need_updating, player_voiceline
+
+    @utils.time_it
+    def __extract_and_apply_beliefs(self, new_message: UserMessage):
+        """Extracts closed-vocabulary claims from this turn's player text and
+        in-game events, and inserts them into every present non-player NPC's
+        belief-state DAG. No-op if belief state / claim extraction isn't
+        wired in (eg tests, or games without a BeliefStateManager).
+
+        The system message (where {belief_state} is rendered) is only built
+        once per conversation and then just sits at the front of
+        self.__messages - inserting into the DAG alone doesn't change text
+        the LLM has already been handed. So when a claim actually lands, this
+        also re-renders the system message in place (same mechanism used when
+        actors change, see __update_conversation_type) so the belief is
+        visible starting with this very turn's response, not just a future
+        conversation's.
+        """
+        belief_state_manager = self.__context.belief_state_manager
+        claim_extractor = self.__context.claim_extractor
+        if belief_state_manager is None or claim_extractor is None:
+            return
+
+        non_player_chars = self.__context.npcs_in_conversation.get_non_player_characters()
+        if not non_player_chars:
+            return
+
+        claims = claim_extractor.extract_claims(
+            new_message.text,
+            new_message.get_ingame_events_text(),
+            non_player_chars,
+            self.__context.game_days,
+        )
+        if not claims:
+            return
+
+        for character in non_player_chars:
+            dag = belief_state_manager.get_dag(character, self.__context.world_id)
+            for claim in claims:
+                beliefstate_engine.insert_or_transition(dag, claim)
+
+        new_prompt = self.__conversation_type.generate_prompt(self.__context)
+        self.__messages.modify_messages(new_prompt, self.__context.npcs_in_conversation.contains_multiple_npcs())
+
+    @utils.time_it
+    def __verify_last_npc_response(self):
+        """Action Verifier: checks the NPC's most recently completed
+        response against its own belief state - extracts closed-vocabulary
+        claims from what it said (tagged LLM_GENERATED) and rejects/logs any
+        that contradict an already-ACTIVE belief instead of inserting them.
+        No-op if action verification / belief state isn't wired in.
+
+        Runs at the start of processing the *next* player turn, mirroring
+        __extract_and_apply_beliefs's timing, rather than immediately after
+        generation completes: responses are streamed sentence-by-sentence
+        with no single "generation complete" callback available here, but by
+        the time the player has replied, the previous AssistantMessage is
+        guaranteed complete and won't be appended to again.
+
+        Scoped to single-NPC conversations: a multi-NPC AssistantMessage's
+        text blends every speaker's lines together, and attributing which
+        NPC said which part isn't something this attempts (yet).
+        """
+        action_verifier = self.__context.action_verifier
+        belief_state_manager = self.__context.belief_state_manager
+        if action_verifier is None or belief_state_manager is None:
+            return
+
+        non_player_chars = self.__context.npcs_in_conversation.get_non_player_characters()
+        if len(non_player_chars) != 1:
+            return
+        speaker = non_player_chars[0]
+
+        last_assistant_message = self.__messages.get_last_assistant_message()
+        if last_assistant_message is None or last_assistant_message is self.__last_verified_message:
+            return
+        self.__last_verified_message = last_assistant_message
+
+        npc_text = last_assistant_message.get_formatted_content()
+        if not npc_text.strip():
+            return
+
+        dag = belief_state_manager.get_dag(speaker, self.__context.world_id)
+        result = action_verifier.verify(speaker, npc_text, dag, non_player_chars, self.__context.game_days)
+
+        if result.accepted:
+            # same reasoning as __extract_and_apply_beliefs: the system
+            # message is only rendered once per conversation and just sits
+            # there otherwise, so an accepted claim needs an explicit
+            # refresh to actually reach the LLM.
+            new_prompt = self.__conversation_type.generate_prompt(self.__context)
+            self.__messages.modify_messages(new_prompt, self.__context.npcs_in_conversation.contains_multiple_npcs())
 
     def __get_mic_prompt(self):
         mic_prompt = f"This is a conversation with {self.__context.get_character_names_as_text(False)} in {self.__context.location}."
@@ -509,7 +619,17 @@ class Conversation:
 
         for npc in npcs_to_summarize:
             conversation_log.save_conversation_log(npc, self.__messages.transform_to_openai_messages(self.__messages.get_talk_only()), self.__context.world_id)
-        
+
+        # Belief-state persistence follows the same save cadence as the native
+        # summary system, but deliberately isn't gated behind the
+        # conversation_summary_enabled toggle below - that setting is about
+        # the text-summary feature, not belief-state, and disabling one
+        # shouldn't silently disable the other.
+        belief_state_manager = self.__context.belief_state_manager
+        if belief_state_manager is not None:
+            for npc in npcs_to_summarize:
+                belief_state_manager.save(npc, self.__context.world_id)
+
         # Skip summary generation if disabled (but always allow reloads to save state)
         if not is_reload and not self.__context.config.conversation_summary_enabled:
             logger.info("Conversation summaries disabled. Skipping summary generation.")

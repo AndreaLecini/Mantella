@@ -8,6 +8,9 @@ from src.llm.sentence import Sentence
 from src.output_manager import ChatManager
 from src.remember.remembering import Remembering
 from src.remember.summaries import Summaries
+from src.beliefstate.manager import BeliefStateManager
+from src.beliefstate.extraction import ClaimExtractor
+from src.beliefstate.verifier import ActionVerifier
 from src.config.config_loader import ConfigLoader
 from src.llm.llm_client import LLMClient
 from src.llm.summary_client import SummaryLLMClient
@@ -41,6 +44,19 @@ class GameStateManager:
         self.__client: LLMClient = client
         self.__chat_manager: ChatManager = chat_manager
         self.__rememberer: Remembering = Summaries(game, config, client, language_info['language'], summary_client)
+        self.__belief_state_manager: BeliefStateManager = BeliefStateManager(game)
+        # Extraction is a separate structured-output call, same category of
+        # task as summarization/tool-calling - prefer whichever dedicated,
+        # presumably smaller/faster auxiliary model the user already has
+        # configured for those (no reason to make them set up a third one),
+        # falling back to the main conversation client if neither is set up.
+        extraction_client = summary_client or getattr(client, '_function_client', None) or client
+        self.__claim_extractor: ClaimExtractor = ClaimExtractor(extraction_client, config)
+        # Reuses the same extractor (and therefore the same underlying
+        # client) as the player-side pipeline - verifying the NPC's own
+        # dialogue is the same kind of structured-extraction task, just
+        # tagged LLM_GENERATED instead of PLAYER_DIALOGUE/ENGINE.
+        self.__action_verifier: ActionVerifier = ActionVerifier(self.__claim_extractor)
         self.__talk: Conversation | None = None
         self.__mic_input: bool = False
         self.__mic_ptt: bool = False # push-to-talk
@@ -68,7 +84,7 @@ class GameStateManager:
             self.process_stt_setup(input_json)
         
         conversation_client = self._build_random_conversation_client() or self.__client
-        context_for_conversation = Context(world_id, self.__config, conversation_client, self.__rememberer, self.__language_info)
+        context_for_conversation = Context(world_id, self.__config, conversation_client, self.__rememberer, self.__language_info, self.__belief_state_manager, self.__claim_extractor, self.__action_verifier)
         self.__talk = Conversation(context_for_conversation, self.__chat_manager, self.__rememberer, conversation_client, self.__stt, self.__mic_input, self.__mic_ptt, self.__game)
         self.__update_context(input_json)
         self.__try_preload_voice_model()

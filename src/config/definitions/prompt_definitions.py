@@ -27,6 +27,7 @@ class PromptDefinitions:
                                 "language", 
                                 "conversation_summary",
                                 "conversation_summaries",
+                                "belief_state",       # <-- nuova riga
                                 "actions"]
     
     ALLOWED_PROMPT_VARIABLES_RADIANT = [
@@ -44,6 +45,7 @@ class PromptDefinitions:
                                 "language", 
                                 "conversation_summary",
                                 "conversation_summaries",
+                                "belief_state",        # <-- nuova riga
                                 "actions"]
     
     ALLOWED_PROMPT_VARIABLES_FUNCTION_LLM = [
@@ -111,6 +113,10 @@ You are {name} in Skyrim. You are talking with {player_name} (the player). The p
 
 # History
 {conversation_summary}
+
+# Beliefs
+The following are propositions {name} holds to be true about the world, other characters, and their relationships. Treat them as established fact and do not contradict them in your response.
+{belief_state}
 
 # Current Scene
 You are now in {location}. The time is {time} {time_group} on Day {current_day}. {weather}

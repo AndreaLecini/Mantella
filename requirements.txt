@@ -1,6 +1,6 @@
 # python 3.11
 setuptools<82
-pandas==1.5.3
+pandas>=2.0.0
 tiktoken==0.4.0
 httpx==0.27.2
 openai==2.8.0
@@ -21,7 +21,7 @@ sounddevice==0.5.1
 regex
 silero-vad-lite
 playsound
-git+https://github.com/usefulsensors/moonshine.git@2f6282347950c8d711bd7319287babb87ec5a92d#subdirectory=moonshine-onnx
+# git+https://github.com/usefulsensors/moonshine.git@2f6282347950c8d711bd7319287babb87ec5a92d#subdirectory=moonshine-onnx
 opentelemetry-api==1.27.0
 opentelemetry-sdk==1.27.0
 opentelemetry-exporter-otlp-proto-grpc==1.27.0
