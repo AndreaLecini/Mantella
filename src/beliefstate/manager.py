@@ -1,10 +1,10 @@
 """
-BeliefStateManager — the connection point between the beliefstate module
+BeliefStateManager, the connection point between the beliefstate module
 (independent of Mantella) and Context/game_manager.
 
 Same shape as src/remember/remembering.py:Remembering.get_prompt_text(), so it
 plugs into Context.generate_system_message() with the same pattern already
-used for conversation_summaries — no new concept for someone reading the
+used for conversation_summaries, no new concept for someone reading the
 code, just a second text source for the prompt.
 
 Persistence: same folder convention as Summaries
@@ -28,11 +28,6 @@ _FILE_NAME = "beliefstate.json"
 
 
 def actor_for_name(name: str) -> Actor | None:
-    """The entity registry is closed (see src/beliefstate/entities.py): an
-    NPC name that doesn't match any Actor member is, by construction, outside
-    the current scope of the belief state. Shared by BeliefStateManager and
-    ClaimExtractor so both map Character names into the closed vocabulary the
-    same way."""
     base_name = utils.remove_trailing_number(name)
     try:
         return Actor(base_name)
@@ -41,9 +36,6 @@ def actor_for_name(name: str) -> Actor | None:
 
 
 class BeliefStateManager:
-    """One instance for the lifetime of the application (like Summaries,
-    which has the exact same dependency on Gameable for the exact same
-    reason: knowing where conversation_folder_path lives)."""
 
     def __init__(self, game: Gameable) -> None:
         self.__game = game
@@ -51,17 +43,11 @@ class BeliefStateManager:
 
     @utils.time_it
     def get_prompt_text(self, characters: list[Character], world_id: str) -> str:
-        """Same signature as Remembering.get_prompt_text(): a block of text
-        to inject into the prompt, one section per NPC if there's more than
-        one."""
+        
         sections = []
         for character in characters:
             actor = actor_for_name(character.name)
             if actor is None:
-                # NPC outside the closed vocabulary (§ entity registry) — the
-                # belief state simply doesn't cover this character, not an
-                # error: it's part of the hybrid architecture (see the scope
-                # note in the spec).
                 continue
             dag = self.__load(character, world_id)
             text = generate_belief_state_text(dag)
@@ -76,8 +62,7 @@ class BeliefStateManager:
         return "\n\n".join(sections)
 
     def get_dag(self, character: Character, world_id: str) -> BeliefStateDAG:
-        """Direct access to the DAG (for Phase 4/5: Action Verifier and
-        Belief Update Node will write here). Read-only at this phase."""
+        
         return self.__load(character, world_id)
 
     def save(self, character: Character, world_id: str) -> None:
@@ -85,7 +70,7 @@ class BeliefStateManager:
         if dag is not None:
             save_to_file(dag, self.__file_path(character, world_id))
 
-    # -- internal --------------------------------------------------------
+    
 
     def __file_path(self, character: Character, world_id: str) -> str:
         base_name = utils.remove_trailing_number(character.name)
@@ -106,9 +91,7 @@ class BeliefStateManager:
             try:
                 dag = load_from_file(path)
             except (ValueError, KeyError) as e:
-                # log and restart from an empty DAG rather than blocking the
-                # conversation — consistent with the fail-soft approach
-                # already used in prompt.py for predicates without a template.
+                
                 logger.warning(f"Invalid belief state for {character.name}, restarting empty: {e}")
                 dag = BeliefStateDAG(npc=character.name)
         else:

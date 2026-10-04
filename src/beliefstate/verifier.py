@@ -1,5 +1,5 @@
 """
-ActionVerifier — checks the NPC's own generated dialogue against its belief
+ActionVerifier, checks the NPC's own generated dialogue against its belief
 state, the way ClaimExtractor + Conversation.__extract_and_apply_beliefs
 check the player's.
 
@@ -38,18 +38,12 @@ class VerificationResult:
 
     @property
     def conflict_rate(self) -> float | None:
-        """conflicting_claims / total_claims, or None if nothing was
-        extracted this turn — a 0/0 rate is undefined, not zero, and must
-        not be silently read as "no contradictions" by a caller aggregating
-        this across a session."""
+    
         return self.conflicting_claims / self.total_claims if self.total_claims else None
 
 
 class ActionVerifier:
-    """One instance for the app's lifetime (same shape as BeliefStateManager
-    and ClaimExtractor): tracks a running session-wide total across every
-    call to verify(), so an aggregate conflict rate is available for data
-    collection, not just a per-turn one."""
+
 
     def __init__(self, claim_extractor: ClaimExtractor) -> None:
         self.__claim_extractor = claim_extractor
@@ -65,28 +59,7 @@ class ActionVerifier:
         involved_characters: list[Character],
         created_at: float,
     ) -> VerificationResult:
-        """Extracts claims from `npc_text` (what `speaker` just said) and
-        applies each one to `dag` via engine.insert_or_transition() —
-        UNLESS it conflicts with an already-ACTIVE statement for the same
-        key, in which case it's logged and counted, never inserted.
-
-        Args:
-            speaker: the NPC whose own dialogue is being verified.
-            npc_text: the NPC's spoken line(s) for this turn.
-            dag: the belief-state DAG to check against and insert into —
-                the caller's responsibility to fetch (eg via
-                BeliefStateManager.get_dag()), same division of
-                responsibility as the player-side pipeline.
-            involved_characters: the non-player NPCs present in the
-                conversation (passed straight through to
-                ClaimExtractor.extract_npc_claims()).
-            created_at: the in-game timestamp to stamp on any resulting
-                Statement (see Context.game_days).
-
-        Returns:
-            VerificationResult: how many claims were extracted, how many of
-            those conflicted (and were rejected), and the accepted ones.
-        """
+        
         claims = self.__claim_extractor.extract_npc_claims(speaker, npc_text, involved_characters, created_at)
 
         accepted: list[Statement] = []
@@ -119,6 +92,5 @@ class ActionVerifier:
 
     @property
     def session_conflict_rate(self) -> float | None:
-        """conflicting_claims / total_claims across every verify() call made
-        by this instance so far, or None if nothing has been extracted yet."""
+        
         return self.__session_total_conflicts / self.__session_total_claims if self.__session_total_claims else None

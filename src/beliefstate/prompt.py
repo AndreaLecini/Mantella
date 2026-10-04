@@ -15,10 +15,7 @@ from .entities import CommitmentClause, CommitmentStatus, TrustLevel, Predicate
 
 
 def _describe(stmt: Statement) -> str | None:
-    """Returns a natural-language sentence for `stmt`, or None if the
-    predicate/value has no defined template (fail-soft: a predicate forgotten
-    here must not break prompt generation, at worst it produces one line
-    fewer)."""
+    
 
     if stmt.predicate == Predicate.POSSESSION:
         verb = "owns" if stmt.value else "no longer owns"
@@ -27,7 +24,7 @@ def _describe(stmt: Statement) -> str | None:
     if stmt.predicate == Predicate.BETRAYAL:
         if stmt.value:
             return f"{stmt.subject.value} betrayed {stmt.object.value}."
-        return None  # BETRAYAL=false produces no line: absence of an event
+        return None  
 
     if stmt.predicate == Predicate.TRUST:
         labels = {

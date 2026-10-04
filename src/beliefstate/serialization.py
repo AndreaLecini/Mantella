@@ -1,5 +1,5 @@
 """
-Serialization for BeliefStateDAG — persisted alongside Summaries' files.
+Serialization for BeliefStateDAG, persisted alongside Summaries' files.
 
 In Mantella, text summaries live in:
     data/conversations/{world_id}/{npc_name}_{ref_id}/{npc_name}_summary_{n}.txt
@@ -7,11 +7,6 @@ This module produces/reads a JSON file in the same folder, e.g.:
     data/conversations/{world_id}/{npc_name}_{ref_id}/{npc_name}_beliefstate.json
 so the DAG follows the same lifecycle as the native summaries (per-world,
 per-NPC).
-
-With both entities and predicates closed (Enum), deserialization no longer
-needs a registry to repopulate at runtime: the correct type for each
-subject/object is derived from PREDICATE_ENTITY_DOMAIN, exactly like
-dag.validate_entities() does.
 """
 
 from __future__ import annotations
@@ -32,8 +27,7 @@ from .entities import (
     StatementType,
 )
 
-# Value-domain Enum, per predicate — needed both for serialization and
-# deserialization to know how to interpret `value` (bool vs which Enum).
+
 _VALUE_ENUM_PER_PREDICATE: dict[Predicate, type | None] = {
     Predicate.POSSESSION: None,  # bool, no Enum
     Predicate.BETRAYAL: None,
@@ -86,8 +80,7 @@ def statement_from_dict(d: dict) -> Statement:
 
 
 def serialize(dag: BeliefStateDAG) -> dict:
-    """Everything needed to reconstruct the DAG: the full log (for audit, not
-    just ACTIVE ones) plus the depends_on edges."""
+    
     return {
         "npc": dag.npc,
         "log": [statement_to_dict(s) for s in dag.log()],
@@ -96,10 +89,7 @@ def serialize(dag: BeliefStateDAG) -> dict:
 
 
 def save_to_file(dag: BeliefStateDAG, path: str) -> None:
-    """Atomic write: writes to a temp file in the same folder and renames it
-    only once the write is complete. If the process dies mid-write (Skyrim/
-    Python crash), the final file stays the last valid one from the previous
-    write — never a truncated/corrupt JSON."""
+    
     tmp_path = f"{path}.tmp"
     with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(serialize(dag), f, ensure_ascii=False, indent=2)
@@ -107,19 +97,7 @@ def save_to_file(dag: BeliefStateDAG, path: str) -> None:
 
 
 def deserialize(data: dict) -> BeliefStateDAG:
-    """Reconstructs the DAG from serialize(). No registry to pass in: entities
-    and predicates are closed at the type level, so reconstruction fails
-    explicitly (ValueError) if the log contains a value outside the closed
-    vocabulary, e.g. after an entities.py change removes an Actor still
-    present in a previously saved file.
-
-    Also advances the process-local id counter past every id in this log
-    (see dag.ensure_id_counter_past) - `data` came from a file, potentially
-    written by an earlier process whose counter has no relation to this
-    process's own, freshly-restarted one. Without this, the next
-    create_statement() call in this process could mint an id that's already
-    active in the DAG we just loaded, silently corrupting it.
-    """
+    
     ensure_id_counter_past(d["id"] for d in data["log"])
     dag = BeliefStateDAG(npc=data["npc"])
     for d in data["log"]:

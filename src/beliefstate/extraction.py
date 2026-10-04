@@ -1,21 +1,13 @@
 """
-ClaimExtractor — turns free text (what the player said, what happened in-game)
+ClaimExtractor, turns free text (what the player said, what happened in-game)
 into candidate belief-state Statements.
 
 Mirrors src/llm/function_client.py's shape: a separate, structured-output LLM
 call distinct from the main conversation-generation call. Where FunctionClient
 constrains the LLM to a tool-calling schema, this constrains it to the closed
 predicate/entity/value vocabulary in entities.py, via a strict JSON schema
-described in the prompt plus strict parsing on the way back — never letting
+described in the prompt plus strict parsing on the way back, never letting
 the LLM invent a predicate or entity name.
-
-This class is a pure "text in, candidate Statements out" component: it never
-touches a BeliefStateDAG and never calls engine.insert(). That split is
-deliberate (see the module-level note in manager.py) — it keeps this class
-trivial to unit-test with a mocked LLM client, and lets the Action Verifier
-(src/beliefstate/verifier.py) reuse the exact same extraction/validation
-logic on the NPC's own dialogue via extract_npc_claims(), without having to
-worry about DAG state itself.
 """
 
 from __future__ import annotations
@@ -105,14 +97,7 @@ class ClaimExtractor:
     """LLM-backed extraction of closed-vocabulary claims from a single
     conversation turn's player text and in-game events."""
 
-    # The underlying client's normal max_tokens is tuned for a short spoken
-    # dialogue line (default 250, see llm_definitions.py) and reused here
-    # since ClaimExtractor doesn't get its own dedicated model config. That's
-    # too small for reasoning models (eg gpt-oss served via Ollama), which
-    # can spend the entire budget on hidden reasoning tokens and return empty
-    # content before ever writing the JSON answer. Overridden per-call via
-    # request_call_with_overridden_params() rather than raising the client's
-    # own max_tokens, so normal dialogue generation is unaffected.
+
     _MAX_TOKENS_OVERRIDE = 1500
 
     @utils.time_it
@@ -150,13 +135,9 @@ class ClaimExtractor:
         involved_actors = {
             actor for c in involved_characters if (actor := actor_for_name(c.name)) is not None
         }
-        # the player is always a valid referent even though they're not part
-        # of "involved_characters" (that list is non-player NPCs only)
         allowed_actors = involved_actors | {Actor.PLAYER}
 
         if not involved_actors:
-            # none of the NPCs in this conversation are in the closed
-            # vocabulary at all -> nothing could possibly be extracted
             return []
         if not player_text.strip() and not game_events_text.strip():
             return []
@@ -190,38 +171,9 @@ class ClaimExtractor:
         involved_characters: list[Character],
         created_at: float,
     ) -> list[Statement]:
-        """Extracts candidate Statements from the NPC's own generated
-        dialogue (`speaker`'s spoken line), for the Action Verifier. Same
-        "text in, candidates out" contract as extract_claims() — this does
-        not touch a DAG, does not decide conflicts, does not insert.
-
-        Every resulting Statement is tagged SourceType.LLM_GENERATED — the
-        lowest tier in SOURCE_TYPE_TIER — since this is the model's own,
-        possibly hallucinated speech, not something the player said or the
-        engine reported. Because the source is always the same for every
-        claim in a single call, unlike extract_claims() the LLM is never
-        asked to tag "source" at all — one fewer required field it could get
-        wrong (see the extract_claims() "source" reliability issues this was
-        designed to avoid entirely for this path).
-
-        Args:
-            speaker: the NPC who said `npc_text`. Must resolve to an Actor
-                (via actor_for_name) or nothing can be extracted.
-            npc_text: the NPC's own spoken line(s) for this turn.
-            involved_characters: the non-player NPCs present in the
-                conversation (same role as in extract_claims() — restricts
-                which Actor names are valid this turn).
-            created_at: the in-game timestamp to stamp on any resulting
-                Statement (see Context.game_days).
-
-        Returns:
-            list[Statement]: candidate statements, already validated against
-            the closed vocabulary. May be empty.
-        """
+        
         speaker_actor = actor_for_name(speaker.name)
         if speaker_actor is None:
-            # the NPC speaking isn't in the closed vocabulary at all -> its
-            # own dialogue can't be expressed in this schema either
             return []
 
         involved_actors = {
@@ -253,7 +205,7 @@ class ClaimExtractor:
                 statements.append(statement)
         return statements
 
-    # -- request construction ------------------------------------------------
+    
 
     def __request(self, player_text: str, game_events_text: str, allowed_actors: set[Actor]) -> str | None:
         system_prompt = self.__build_system_prompt(allowed_actors)
@@ -361,7 +313,7 @@ If nothing applies, output exactly: []"""
             f'object is an {object_type.__name__} name, value is {value_desc}.'
         )
 
-    # -- response parsing ------------------------------------------------
+    
 
     @staticmethod
     def __parse_response(raw_response: str) -> list[dict] | None:
@@ -385,12 +337,7 @@ If nothing applies, output exactly: []"""
         created_at: float,
         fixed_source_type: SourceType | None = None,
     ) -> Statement | None:
-        """`fixed_source_type`: when given, every claim is stamped with this
-        source_type unconditionally and no "source" key is read/required
-        (used by extract_npc_claims(), where the source is always
-        LLM_GENERATED and never ambiguous). When None (extract_claims()'s
-        player/game-event path), "source" must be present in `claim` and
-        resolves to PLAYER_DIALOGUE or ENGINE, or the claim is dropped."""
+        
         predicate_raw = claim.get("predicate")
         try:
             predicate = Predicate(predicate_raw)
@@ -416,9 +363,7 @@ If nothing applies, output exactly: []"""
             logger.debug(f"Claim extraction: object {object_.value!r} not in allowed actors for this turn, dropping claim.")
             return None
 
-        # __parse_value only returns None on genuine parse failure: for a
-        # bool-domain predicate, a legitimate value=False parses to False,
-        # never to None.
+        
         value = self.__parse_value(predicate, claim.get("value"))
         if value is None:
             logger.debug(f"Claim extraction: invalid value {claim.get('value')!r} for {predicate.value}, dropping claim.")

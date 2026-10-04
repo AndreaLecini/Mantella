@@ -3,7 +3,7 @@ Closed registries for the Belief State Node.
 
 Everything here is deliberately closed (Enum): predicates, types, source_type,
 and entities (actors/items). The DAG only covers the set involved in the
-experiments — closing the entities too, not just the predicates, keeps every
+experiments, closing the entities too, not just the predicates, keeps every
 proposition comparable and the whole prototype controllable and testable.
 Extending the domain (new NPC, new item, new predicate) is always an explicit
 change to this file, never a runtime registration.
@@ -15,10 +15,6 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Callable
 
-
-# ---------------------------------------------------------------------------
-# Types and predicates (closed)
-# ---------------------------------------------------------------------------
 
 class StatementType(Enum):
     FACT = "Fact"
@@ -65,10 +61,6 @@ class CommitmentClause(Enum):
     DELIVER_ITEM = "DELIVER_ITEM"
 
 
-# ---------------------------------------------------------------------------
-# Entity registry (closed, same principle as the predicates — see docstring)
-# ---------------------------------------------------------------------------
-
 class Actor(Enum):
     """Actors involved in the experiments — closed set, not extensible at
     runtime. Adding an NPC means adding a line here, at scenario design time,
@@ -89,12 +81,6 @@ class Item(Enum):
     DAGGER = "Dagger"
 
 
-# ---------------------------------------------------------------------------
-# Lookups and domains derived from the predicate
-# ---------------------------------------------------------------------------
-
-# Predicate -> type lookup (spec §2). Single source of truth: the `type` of a
-# proposition is always derived from here, never passed by hand.
 PREDICATE_TYPE: dict[Predicate, StatementType] = {
     Predicate.POSSESSION: StatementType.FACT,
     Predicate.BETRAYAL: StatementType.FACT,
@@ -103,8 +89,7 @@ PREDICATE_TYPE: dict[Predicate, StatementType] = {
     Predicate.COMMITMENT: StatementType.COMMITMENT,
 }
 
-# Allowed value domain for each predicate — used to validate `value` when a
-# proposition is created.
+
 PREDICATE_VALUE_DOMAIN: dict[Predicate, type] = {
     Predicate.POSSESSION: bool,
     Predicate.BETRAYAL: bool,
@@ -113,10 +98,7 @@ PREDICATE_VALUE_DOMAIN: dict[Predicate, type] = {
     Predicate.COMMITMENT: CommitmentClause,
 }
 
-# Expected entity type for subject/object of each predicate: the Enum class
-# itself (Actor or Item), not just a label. Validation (dag.py) is therefore a
-# direct isinstance() — no lookup into a registry, no mutable state to keep
-# in sync.
+
 PREDICATE_ENTITY_DOMAIN: dict[Predicate, tuple[type, type]] = {
     Predicate.POSSESSION: (Actor, Item),
     Predicate.BETRAYAL: (Actor, Actor),
@@ -125,8 +107,7 @@ PREDICATE_ENTITY_DOMAIN: dict[Predicate, tuple[type, type]] = {
     Predicate.COMMITMENT: (Actor, Actor),
 }
 
-# Source reliability scale (§6). The list order is the tier order, ascending:
-# the last element always wins against all previous ones.
+
 SOURCE_TYPE_TIER: dict[SourceType, int] = {
     SourceType.LLM_GENERATED: 0,
     SourceType.PLAYER_DIALOGUE: 1,
@@ -135,13 +116,9 @@ SOURCE_TYPE_TIER: dict[SourceType, int] = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Dependency rule table (§5, closed)
-# ---------------------------------------------------------------------------
-
 @dataclass(frozen=True)
 class Rule:
-    """A row of the §5 table. `bind` computes the (subject, object) of the
+    """table of bindings. `bind` computes the (subject, object) of the
     target proposition from the trigger proposition that satisfied the
     condition — for the three rules in the spec this is always a subject/
     object swap, but kept as a function so future rules aren't restricted to
@@ -149,13 +126,13 @@ class Rule:
 
     name: str
     trigger_predicate: Predicate
-    trigger_condition: Callable[["Statement"], bool]  # type: ignore[name-defined]
+    trigger_condition: Callable[["Statement"], bool]  
     target_predicate: Predicate
     target_value: object
-    bind: Callable[["Statement"], tuple[object, object]]  # type: ignore[name-defined]
+    bind: Callable[["Statement"], tuple[object, object]]  
 
 
-def _swap_subject_object(trigger: "Statement") -> tuple[object, object]:  # type: ignore[name-defined]
+def _swap_subject_object(trigger: "Statement") -> tuple[object, object]:  
     return trigger.object, trigger.subject
 
 
@@ -186,9 +163,7 @@ RULES: list[Rule] = [
     ),
 ]
 
-# Design constraint (§5): the table must be acyclic — no rule's target is ever
-# another rule's trigger. Verified statically, once, at module import (not at
-# runtime on every turn).
+
 _trigger_predicates = {r.trigger_predicate for r in RULES}
 _target_predicates = {r.target_predicate for r in RULES}
 assert _trigger_predicates.isdisjoint(_target_predicates), (
